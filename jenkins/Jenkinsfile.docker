@@ -1,0 +1,112 @@
+// Jenkinsfile alternativo usando Docker
+// Útil cuando no tienes JMeter instalado en el servidor Jenkins
+
+pipeline {
+    agent {
+        docker {
+            image 'justb4/jmeter:5.6.3'
+            args '-v ${WORKSPACE}:/workspace -w /workspace --user root'
+        }
+    }
+    
+    environment {
+        RESULTS_DIR = 'results'
+        TIMESTAMP = "${new Date().format('yyyyMMdd_HHmmss')}"
+    }
+    
+    parameters {
+        choice(
+            name: 'TEST_PLAN',
+            choices: ['basic-http-test.jmx', 'variables-test.jmx'],
+            description: 'Seleccionar el plan de prueba a ejecutar'
+        )
+        string(
+            name: 'THREADS',
+            defaultValue: '10',
+            description: 'Número de usuarios virtuales (threads)'
+        )
+        string(
+            name: 'RAMP_UP',
+            defaultValue: '10',
+            description: 'Tiempo de ramp-up en segundos'
+        )
+        string(
+            name: 'LOOPS',
+            defaultValue: '5',
+            description: 'Número de iteraciones por thread'
+        )
+    }
+    
+    stages {
+        stage('🔍 Verificar Entorno Docker') {
+            steps {
+                sh '''
+                    echo "============================================"
+                    echo "JMeter Docker Pipeline"
+                    echo "============================================"
+                    jmeter --version
+                    echo "============================================"
+                '''
+            }
+        }
+        
+        stage('🧹 Preparar Workspace') {
+            steps {
+                sh '''
+                    rm -rf ${RESULTS_DIR}/*.jtl
+                    rm -rf ${RESULTS_DIR}/report_*
+                    mkdir -p ${RESULTS_DIR}
+                '''
+            }
+        }
+        
+        stage('🚀 Ejecutar Test JMeter') {
+            steps {
+                script {
+                    def resultFile = "${RESULTS_DIR}/results_${TIMESTAMP}.jtl"
+                    def reportDir = "${RESULTS_DIR}/report_${TIMESTAMP}"
+                    
+                    sh """
+                        jmeter -n \
+                            -t test-plans/${params.TEST_PLAN} \
+                            -l ${resultFile} \
+                            -e -o ${reportDir} \
+                            -Jthreads=${params.THREADS} \
+                            -Jrampup=${params.RAMP_UP} \
+                            -Jloops=${params.LOOPS}
+                    """
+                    
+                    env.RESULT_FILE = resultFile
+                    env.REPORT_DIR = reportDir
+                }
+            }
+        }
+        
+        stage('📊 Publicar Resultados') {
+            steps {
+                publishHTML(target: [
+                    allowMissing: false,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: "${env.REPORT_DIR}",
+                    reportFiles: 'index.html',
+                    reportName: 'JMeter Performance Report'
+                ])
+                
+                archiveArtifacts artifacts: "${RESULTS_DIR}/**/*", fingerprint: true
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo "Pipeline finalizado - Reporte en: ${env.REPORT_DIR}"
+        }
+        success {
+            echo "✅ Tests completados exitosamente"
+        }
+        failure {
+            echo "❌ Tests fallaron"
+        }
+    }
+}

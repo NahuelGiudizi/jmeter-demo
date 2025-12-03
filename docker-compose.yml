@@ -1,0 +1,53 @@
+# Docker Compose para ejecutar JMeter localmente
+# Útil para desarrollo y pruebas sin instalar JMeter
+
+version: '3.8'
+
+services:
+  jmeter:
+    image: justb4/jmeter:5.6.3
+    container_name: jmeter-runner
+    volumes:
+      - ./test-plans:/test-plans:ro
+      - ./results:/results
+    working_dir: /test-plans
+    environment:
+      - HEAP=-Xms512m -Xmx1024m
+    command: >
+      -n
+      -t /test-plans/basic-http-test.jmx
+      -l /results/results.jtl
+      -e -o /results/report
+    profiles:
+      - run-test
+
+  # Servicio para generar solo el reporte HTML
+  jmeter-report:
+    image: justb4/jmeter:5.6.3
+    container_name: jmeter-report-generator
+    volumes:
+      - ./results:/results
+    command: >
+      -g /results/results.jtl
+      -o /results/html-report
+    profiles:
+      - generate-report
+
+  # Jenkins local para desarrollo
+  jenkins:
+    image: jenkins/jenkins:lts
+    container_name: jenkins-jmeter
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - JAVA_OPTS=-Djenkins.install.runSetupWizard=false
+    profiles:
+      - jenkins
+
+volumes:
+  jenkins_home:
+    name: jenkins_jmeter_data
